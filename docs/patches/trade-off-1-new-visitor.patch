@@ -1,0 +1,120 @@
+diff --git a/src/main/java/com/stockexchange/visitor/visitors/AssetAllocationVisitor.java b/src/main/java/com/stockexchange/visitor/visitors/AssetAllocationVisitor.java
+new file mode 100644
+index 0000000..054e374
+--- /dev/null
++++ b/src/main/java/com/stockexchange/visitor/visitors/AssetAllocationVisitor.java
+@@ -0,0 +1,61 @@
++package com.stockexchange.visitor.visitors;
++
++import com.stockexchange.visitor.StockElement;
++import com.stockexchange.visitor.StockVisitor;
++import com.stockexchange.visitor.composite.Account;
++import com.stockexchange.visitor.composite.Portfolio;
++import com.stockexchange.visitor.leaf.Bond;
++import com.stockexchange.visitor.leaf.Fund;
++import com.stockexchange.visitor.leaf.OptionContract;
++import com.stockexchange.visitor.leaf.Stock;
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.Map;
++import java.util.TreeMap;
++
++/** Market value per asset class (stock, bond, fund, option) for any subtree. */
++public final class AssetAllocationVisitor implements StockVisitor<Map<String, BigDecimal>> {
++    private final TotalValueVisitor valuation;
++
++    public AssetAllocationVisitor(TotalValueVisitor valuation) {
++        this.valuation = valuation;
++    }
++
++    @Override
++    public Map<String, BigDecimal> visit(Portfolio portfolio) {
++        return merge(portfolio.accounts());
++    }
++
++    @Override
++    public Map<String, BigDecimal> visit(Account account) {
++        return merge(account.holdings());
++    }
++
++    @Override
++    public Map<String, BigDecimal> visit(Stock stock) {
++        return Map.of("stock", stock.accept(valuation));
++    }
++
++    @Override
++    public Map<String, BigDecimal> visit(Bond bond) {
++        return Map.of("bond", bond.accept(valuation));
++    }
++
++    @Override
++    public Map<String, BigDecimal> visit(Fund fund) {
++        return Map.of("fund", fund.accept(valuation));
++    }
++
++    @Override
++    public Map<String, BigDecimal> visit(OptionContract option) {
++        return Map.of("option", option.accept(valuation));
++    }
++
++    private Map<String, BigDecimal> merge(List<? extends StockElement> children) {
++        Map<String, BigDecimal> totals = new TreeMap<>();
++        for (StockElement child : children) {
++            child.accept(this).forEach((assetClass, value) -> totals.merge(assetClass, value, BigDecimal::add));
++        }
++        return totals;
++    }
++}
+diff --git a/src/test/java/com/stockexchange/visitor/AssetAllocationVisitorTest.java b/src/test/java/com/stockexchange/visitor/AssetAllocationVisitorTest.java
+new file mode 100644
+index 0000000..9b7eae1
+--- /dev/null
++++ b/src/test/java/com/stockexchange/visitor/AssetAllocationVisitorTest.java
+@@ -0,0 +1,47 @@
++package com.stockexchange.visitor;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++import com.stockexchange.visitor.composite.Account;
++import com.stockexchange.visitor.composite.Portfolio;
++import com.stockexchange.visitor.leaf.Fund;
++import com.stockexchange.visitor.leaf.OptionContract;
++import com.stockexchange.visitor.leaf.Stock;
++import com.stockexchange.visitor.visitors.AssetAllocationVisitor;
++import com.stockexchange.visitor.visitors.TotalValueVisitor;
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.Map;
++import java.util.Optional;
++import org.junit.jupiter.api.Test;
++
++class AssetAllocationVisitorTest {
++    private static final Map<String, BigDecimal> PRICES = Map.of(
++            "AAPL", new BigDecimal("120"), "VOO", new BigDecimal("60"));
++
++    private final AssetAllocationVisitor allocation = new AssetAllocationVisitor(
++            new TotalValueVisitor(s -> Optional.ofNullable(PRICES.get(s))));
++
++    private static void assertDecimal(String expected, BigDecimal actual) {
++        assertEquals(0, new BigDecimal(expected).compareTo(actual), "expected " + expected + " but was " + actual);
++    }
++
++    @Test
++    void valueIsSplitByAssetClassAcrossAccounts() {
++        Portfolio portfolio = new Portfolio("Alice", List.of(
++                new Account("A", List.of(new Stock("AAPL", 10, BigDecimal.ONE),
++                        new OptionContract("AAPL", 1, new BigDecimal("100"), true))),
++                new Account("B", List.of(new Stock("AAPL", 5, BigDecimal.ONE),
++                        new Fund("VOO", 20, BigDecimal.ONE, 0.5)))));
++        Map<String, BigDecimal> result = portfolio.accept(allocation);
++        assertDecimal("1800", result.get("stock"));    // 10x120 + 5x120
++        assertDecimal("2000", result.get("option"));   // 100 x (120 - 100)
++        assertDecimal("1200", result.get("fund"));     // 20 x 60
++    }
++
++    @Test
++    void worksOnASingleAccountSubtree() {
++        Account account = new Account("A", List.of(new Stock("AAPL", 1, BigDecimal.ONE)));
++        assertEquals(1, account.accept(allocation).size());
++    }
++}

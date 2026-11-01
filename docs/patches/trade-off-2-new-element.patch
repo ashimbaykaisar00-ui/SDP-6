@@ -1,0 +1,231 @@
+diff --git a/src/main/java/com/stockexchange/visitor/StockVisitor.java b/src/main/java/com/stockexchange/visitor/StockVisitor.java
+index dfc0e54..91c5f33 100644
+--- a/src/main/java/com/stockexchange/visitor/StockVisitor.java
++++ b/src/main/java/com/stockexchange/visitor/StockVisitor.java
+@@ -3,6 +3,7 @@ package com.stockexchange.visitor;
+ import com.stockexchange.visitor.composite.Account;
+ import com.stockexchange.visitor.composite.Portfolio;
+ import com.stockexchange.visitor.leaf.Bond;
++import com.stockexchange.visitor.leaf.CryptoAsset;
+ import com.stockexchange.visitor.leaf.Fund;
+ import com.stockexchange.visitor.leaf.OptionContract;
+ import com.stockexchange.visitor.leaf.Stock;
+@@ -20,4 +21,6 @@ public interface StockVisitor<R> {
+     R visit(Fund fund);
+ 
+     R visit(OptionContract option);
++
++    R visit(CryptoAsset crypto);
+ }
+diff --git a/src/main/java/com/stockexchange/visitor/leaf/CryptoAsset.java b/src/main/java/com/stockexchange/visitor/leaf/CryptoAsset.java
+new file mode 100644
+index 0000000..cd9177b
+--- /dev/null
++++ b/src/main/java/com/stockexchange/visitor/leaf/CryptoAsset.java
+@@ -0,0 +1,18 @@
++package com.stockexchange.visitor.leaf;
++
++import com.stockexchange.visitor.StockElement;
++import com.stockexchange.visitor.StockVisitor;
++import java.math.BigDecimal;
++import java.util.Objects;
++
++public record CryptoAsset(String symbol, int units, BigDecimal costBasis) implements StockElement {
++    public CryptoAsset {
++        Objects.requireNonNull(symbol);
++        Objects.requireNonNull(costBasis);
++    }
++
++    @Override
++    public <R> R accept(StockVisitor<R> visitor) {
++        return visitor.visit(this);
++    }
++}
+diff --git a/src/main/java/com/stockexchange/visitor/visitors/AssetAllocationVisitor.java b/src/main/java/com/stockexchange/visitor/visitors/AssetAllocationVisitor.java
+index 054e374..7e13e2a 100644
+--- a/src/main/java/com/stockexchange/visitor/visitors/AssetAllocationVisitor.java
++++ b/src/main/java/com/stockexchange/visitor/visitors/AssetAllocationVisitor.java
+@@ -5,6 +5,7 @@ import com.stockexchange.visitor.StockVisitor;
+ import com.stockexchange.visitor.composite.Account;
+ import com.stockexchange.visitor.composite.Portfolio;
+ import com.stockexchange.visitor.leaf.Bond;
++import com.stockexchange.visitor.leaf.CryptoAsset;
+ import com.stockexchange.visitor.leaf.Fund;
+ import com.stockexchange.visitor.leaf.OptionContract;
+ import com.stockexchange.visitor.leaf.Stock;
+@@ -51,6 +52,11 @@ public final class AssetAllocationVisitor implements StockVisitor<Map<String, Bi
+         return Map.of("option", option.accept(valuation));
+     }
+ 
++    @Override
++    public Map<String, BigDecimal> visit(CryptoAsset crypto) {
++        return Map.of("crypto", crypto.accept(valuation));
++    }
++
+     private Map<String, BigDecimal> merge(List<? extends StockElement> children) {
+         Map<String, BigDecimal> totals = new TreeMap<>();
+         for (StockElement child : children) {
+diff --git a/src/main/java/com/stockexchange/visitor/visitors/AssetFilterVisitor.java b/src/main/java/com/stockexchange/visitor/visitors/AssetFilterVisitor.java
+index d7dd5f6..468b06b 100644
+--- a/src/main/java/com/stockexchange/visitor/visitors/AssetFilterVisitor.java
++++ b/src/main/java/com/stockexchange/visitor/visitors/AssetFilterVisitor.java
+@@ -5,6 +5,7 @@ import com.stockexchange.visitor.StockVisitor;
+ import com.stockexchange.visitor.composite.Account;
+ import com.stockexchange.visitor.composite.Portfolio;
+ import com.stockexchange.visitor.leaf.Bond;
++import com.stockexchange.visitor.leaf.CryptoAsset;
+ import com.stockexchange.visitor.leaf.Fund;
+ import com.stockexchange.visitor.leaf.OptionContract;
+ import com.stockexchange.visitor.leaf.Stock;
+@@ -53,6 +54,11 @@ public final class AssetFilterVisitor implements StockVisitor<List<StockElement>
+         return keepIfMatches(option);
+     }
+ 
++    @Override
++    public List<StockElement> visit(CryptoAsset crypto) {
++        return keepIfMatches(crypto);
++    }
++
+     private List<StockElement> keepIfMatches(StockElement leaf) {
+         return condition.test(leaf) ? List.of(leaf) : List.of();
+     }
+diff --git a/src/main/java/com/stockexchange/visitor/visitors/RiskScoreVisitor.java b/src/main/java/com/stockexchange/visitor/visitors/RiskScoreVisitor.java
+index f07ee98..de0fa6c 100644
+--- a/src/main/java/com/stockexchange/visitor/visitors/RiskScoreVisitor.java
++++ b/src/main/java/com/stockexchange/visitor/visitors/RiskScoreVisitor.java
+@@ -5,6 +5,7 @@ import com.stockexchange.visitor.StockVisitor;
+ import com.stockexchange.visitor.composite.Account;
+ import com.stockexchange.visitor.composite.Portfolio;
+ import com.stockexchange.visitor.leaf.Bond;
++import com.stockexchange.visitor.leaf.CryptoAsset;
+ import com.stockexchange.visitor.leaf.Fund;
+ import com.stockexchange.visitor.leaf.OptionContract;
+ import com.stockexchange.visitor.leaf.Stock;
+@@ -27,6 +28,7 @@ public final class RiskScoreVisitor implements StockVisitor<Double> {
+     private static final double FUND_BASE_RISK = 20.0;
+     private static final double FUND_EQUITY_RISK = 60.0;
+     private static final double OPTION_RISK = 95.0;
++    private static final double CRYPTO_RISK = 98.0;
+ 
+     private final TotalValueVisitor valuation;
+     private double weightedRisk;
+@@ -75,6 +77,11 @@ public final class RiskScoreVisitor implements StockVisitor<Double> {
+         return accumulate(option, OPTION_RISK);
+     }
+ 
++    @Override
++    public Double visit(CryptoAsset crypto) {
++        return accumulate(crypto, CRYPTO_RISK);
++    }
++
+     private double accumulate(StockElement leaf, double risk) {
+         BigDecimal value = leaf.accept(valuation);
+         weightedRisk += risk * value.doubleValue();
+diff --git a/src/main/java/com/stockexchange/visitor/visitors/TotalValueVisitor.java b/src/main/java/com/stockexchange/visitor/visitors/TotalValueVisitor.java
+index aa9bd42..0c8f1be 100644
+--- a/src/main/java/com/stockexchange/visitor/visitors/TotalValueVisitor.java
++++ b/src/main/java/com/stockexchange/visitor/visitors/TotalValueVisitor.java
+@@ -5,6 +5,7 @@ import com.stockexchange.visitor.StockVisitor;
+ import com.stockexchange.visitor.composite.Account;
+ import com.stockexchange.visitor.composite.Portfolio;
+ import com.stockexchange.visitor.leaf.Bond;
++import com.stockexchange.visitor.leaf.CryptoAsset;
+ import com.stockexchange.visitor.leaf.Fund;
+ import com.stockexchange.visitor.leaf.OptionContract;
+ import com.stockexchange.visitor.leaf.Stock;
+@@ -61,6 +62,11 @@ public final class TotalValueVisitor implements StockVisitor<BigDecimal> {
+         return intrinsic.max(BigDecimal.ZERO).multiply(CONTRACT_SIZE).multiply(BigDecimal.valueOf(option.contracts()));
+     }
+ 
++    @Override
++    public BigDecimal visit(CryptoAsset crypto) {
++        return priceOr(crypto.symbol(), crypto.costBasis()).multiply(BigDecimal.valueOf(crypto.units()));
++    }
++
+     private BigDecimal priceOr(String symbol, BigDecimal fallback) {
+         return priceLookup.apply(symbol).orElse(fallback);
+     }
+diff --git a/src/main/java/com/stockexchange/visitor/visitors/XmlExportVisitor.java b/src/main/java/com/stockexchange/visitor/visitors/XmlExportVisitor.java
+index b8b258a..4623569 100644
+--- a/src/main/java/com/stockexchange/visitor/visitors/XmlExportVisitor.java
++++ b/src/main/java/com/stockexchange/visitor/visitors/XmlExportVisitor.java
+@@ -5,6 +5,7 @@ import com.stockexchange.visitor.StockVisitor;
+ import com.stockexchange.visitor.composite.Account;
+ import com.stockexchange.visitor.composite.Portfolio;
+ import com.stockexchange.visitor.leaf.Bond;
++import com.stockexchange.visitor.leaf.CryptoAsset;
+ import com.stockexchange.visitor.leaf.Fund;
+ import com.stockexchange.visitor.leaf.OptionContract;
+ import com.stockexchange.visitor.leaf.Stock;
+@@ -52,6 +53,12 @@ public final class XmlExportVisitor implements StockVisitor<String> {
+                 + "\" type=\"" + (option.call() ? "call" : "put") + "\"/>";
+     }
+ 
++    @Override
++    public String visit(CryptoAsset crypto) {
++        return "<crypto symbol=\"" + escape(crypto.symbol()) + "\" units=\"" + crypto.units()
++                + "\" costBasis=\"" + crypto.costBasis().toPlainString() + "\"/>";
++    }
++
+     private String children(List<? extends StockElement> elements) {
+         return elements.stream().map(element -> element.accept(this)).collect(Collectors.joining());
+     }
+diff --git a/src/test/java/com/stockexchange/visitor/CryptoAssetTest.java b/src/test/java/com/stockexchange/visitor/CryptoAssetTest.java
+new file mode 100644
+index 0000000..4c04dde
+--- /dev/null
++++ b/src/test/java/com/stockexchange/visitor/CryptoAssetTest.java
+@@ -0,0 +1,33 @@
++package com.stockexchange.visitor;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++import com.stockexchange.visitor.composite.Account;
++import com.stockexchange.visitor.leaf.CryptoAsset;
++import com.stockexchange.visitor.visitors.AssetFilterVisitor;
++import com.stockexchange.visitor.visitors.RiskScoreVisitor;
++import com.stockexchange.visitor.visitors.TotalValueVisitor;
++import com.stockexchange.visitor.visitors.XmlExportVisitor;
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.Optional;
++import org.junit.jupiter.api.Test;
++
++class CryptoAssetTest {
++    private final TotalValueVisitor valuation = new TotalValueVisitor(
++            s -> s.equals("BTC") ? Optional.of(new BigDecimal("40000")) : Optional.empty());
++    private final Account wallet = new Account("W", List.of(new CryptoAsset("BTC", 2, new BigDecimal("30000"))));
++
++    @Test
++    void valueRiskAndFilterOfTheNewElement() {
++        assertEquals(0, new BigDecimal("80000").compareTo(wallet.accept(valuation)));      // 2 x 40000
++        assertEquals(98.0, wallet.accept(new RiskScoreVisitor(valuation)), 1e-9);
++        assertEquals(1, wallet.accept(AssetFilterVisitor.bySymbol("BTC")).size());
++    }
++
++    @Test
++    void xmlExportKnowsTheNewElement() {
++        assertEquals("<account id=\"W\"><crypto symbol=\"BTC\" units=\"2\" costBasis=\"30000\"/></account>",
++                wallet.accept(new XmlExportVisitor()));
++    }
++}
+diff --git a/src/test/java/com/stockexchange/visitor/StockVisitorTest.java b/src/test/java/com/stockexchange/visitor/StockVisitorTest.java
+index 3997b62..5341ac2 100644
+--- a/src/test/java/com/stockexchange/visitor/StockVisitorTest.java
++++ b/src/test/java/com/stockexchange/visitor/StockVisitorTest.java
+@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
+ import com.stockexchange.visitor.composite.Account;
+ import com.stockexchange.visitor.composite.Portfolio;
+ import com.stockexchange.visitor.leaf.Bond;
++import com.stockexchange.visitor.leaf.CryptoAsset;
+ import com.stockexchange.visitor.leaf.Fund;
+ import com.stockexchange.visitor.leaf.OptionContract;
+ import com.stockexchange.visitor.leaf.Stock;
+@@ -155,6 +156,7 @@ class StockVisitorTest {
+             public String visit(Bond b) { return "bond"; }
+             public String visit(Fund f) { return "fund"; }
+             public String visit(OptionContract o) { return "option"; }
++            public String visit(CryptoAsset c) { return "crypto"; }
+         });
+         assertEquals("stock", visited);
+     }
